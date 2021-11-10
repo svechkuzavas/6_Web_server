@@ -1,60 +1,71 @@
-import socket
 import os
+import socket
+import datetime
 
-def get_route(req):
-    method, route = '', ''
-    try:
-        head_data = req.split('\n')[0]
-        method, route, protocol = head_data.split(' ')
+
+class HTTPServer:
+    def __init__(self, port):
+        self._port = port
+
+    def run(self):
+        serv_sock = socket.socket(
+            socket.AF_INET,
+            socket.SOCK_STREAM)
+        try:
+            serv_sock.bind(('', self._port))
+            serv_sock.listen(1)
+            print(f"Server is started and listening on port {self._port}")
+            while True:
+                conn, addr = serv_sock.accept()
+                print(f"New connection: {str(addr)}")
+                try:
+                    self.handle_client(conn)
+                except Exception as e:
+                    print('Client handling failed', e)
+        finally:
+            serv_sock.close()
+
+    def handle_client(self, conn):
+        try:
+            req = self.parse_request(conn)
+            self.send_response(conn, req['data'])
+        except ConnectionResetError:
+            conn = None
+        except Exception as e:
+            self.send_error(conn, e)
+        if conn:
+            conn.close()
+
+    def parse_request(self, conn):
+        rfile = conn.makefile('r')
+        raw = rfile.readline(64*1024 + 1).split()
+        filename = '/index' if raw[1] == '/' else raw[1]
         return {
-            'method': method,
-            'route': route,
-            'data': response_data(route) if route != '/close' else 'Server closed',
+            'method': raw[0],
+            'route': raw[1],
+            'data': self.read_file(filename) if raw[1] != '/close' else 'Server closed',
         }
-    except Exception as e:
-        return None
+
+    def read_file(self, route):
+        with open(os.path.join('data', f'{route[1:]}.html')) as f:
+            return ''.join(f.readlines())
+
+    def send_response(self, conn, resp_body):
+        response = f"""HTTP/1.1 200 OK
+Server: KirillZaycevWebServer v0.0.1
+Content-type: text/html
+Connection: close
+Date: {datetime.date.today()}
+Content-length: {len(resp_body)}
 
 
-def response_data(route):
-    with open(os.path.join('data', route[1:])+".html") as f:
-        return ''.join(f.readlines())
+{resp_body}"""
+        conn.send(response.encode('utf-8'))
+
+    def send_error(self, conn, err):
+        print(err)
 
 
-sock = socket.socket()
-
-try:
-    sock.bind(('', 80))
-    print("Using port 80")
-except OSError:
-    sock.bind(('', 8080))
-    print("Using port 8080")
-
-sock.listen(5)
-
-conn, addr = sock.accept()
-print("Connected", addr)
-data = conn.recv(8192)
-
-msg = data.decode()
-routing = get_route(msg)
-resp = f"""HTTP/1.1 200 OK
-    Server: SelfMadeServer v0.0.1
-    Content-type: text/html
-    Connection: close
-
-    {routing['data']}"""
-conn.send(resp.encode())
-
-while routing is None or routing['route'] != '/close':
-    data = conn.recv(8192)
-    msg = data.decode()
-    routing = get_route(msg)
-
-    resp = f"""HTTP/1.1 200 OK
-    Server: SelfMadeServer v0.0.1
-    Content-type: text/html
-    Connection: close
-    
-    {routing['data']}"""
-    conn.send(resp.encode())
-conn.close()
+if __name__ == '__main__':
+    server = HTTPServer(8080)
+    server.run()
