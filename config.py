@@ -1,0 +1,3 @@
+PORT = 8080
+MAX_BYTES = 8192
+PATH = 'data'
